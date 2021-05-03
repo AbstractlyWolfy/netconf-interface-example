@@ -36,12 +36,10 @@ def get_interface_statuses(connection):
     interface_name = response.xpath('//physical-interface/name')
     interface_status = response.xpath('//physical-interface/oper-status')
 
-    result = []
-
     for name, status in zip(interface_name, interface_status):
-        result.append([name.text.split('\n')[1], status.text.split('\n')[1]])
-
-    return result
+        interface_name = name.text.split('\n')[1]
+        interface_status = status.text.split('\n')[1]
+        yield (interface_name, interface_status)
 
 
 # Execute command
