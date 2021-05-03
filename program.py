@@ -39,9 +39,7 @@ def get_interface_statuses(connection):
     result = []
 
     for name, status in zip(interface_name, interface_status):
-        interface_name = name.text.split('\n')[1]
-        interface_status = status.text.split('\n')[1]
-        result.append([interface_name, interface_status])
+        result.append([name.text.split('\n')[1], status.text.split('\n')[1]])
 
     return result
 
@@ -66,9 +64,7 @@ interface_statuses = get_interface_statuses(connection)
 
 print("Connected..")
 
-for i in range(len(interface_statuses)):
-    interface_name = interface_statuses[i][0]
-    interface_status = interface_statuses[i][1]
+for interface_name, interface_status in interface_statuses:
     print("Interface %s: %s" % (interface_name, interface_status))
 
 send_netconf_command(connection, "set interfaces LAST FETCH: %s" % int(datetime.now().timestamp()))
