@@ -9,11 +9,17 @@ from ncclient import manager
 # JSON
 import json
 
+# XML
+import xml.etree.ElementTree as ElementTree # This handles loading
+import lxml.etree as ET # This version allowed for merging due to encode errors
+
+# FILTERS
+INTERFACE_FILTER = '''<interface-configurations xmlns="http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg"></interface-configurations>'''
+
 # Configuration
-with open("./config/config.json") as data:
+with open("config/config.json") as data:
     config = json.load(data)
     serverCfg = config['server']
-
 
 # Connect to Netconf
 # Based on https://github.com/ncclient/ncclient/blob/master/examples/juniper/get-interface-status.py
@@ -23,46 +29,45 @@ def connect(cfg):
         port=cfg['port'],
         username=cfg['username'],
         password=cfg['password'],
-        device_params={'name': 'junos'},
-        hostkey_verify=False  # Disables verify over SSL
+        device_params={'name': cfg['type']},
+        hostkey_verify=False
     )
 
 
 # Get interfaces and status from Netconf
 # Based on https://github.com/ncclient/ncclient/blob/master/examples/juniper/get-interface-status.py
 def get_interface_statuses(connection):
-    rpc = "<get-interface-information><terse/></get-interface-information>"
-    response = connection.rpc(rpc)
-    interface_name = response.xpath('//physical-interface/name')
-    interface_status = response.xpath('//physical-interface/oper-status')
-
-    for name, status in zip(interface_name, interface_status):
-        interface_name = name.text.split('\n')[1]
-        interface_status = status.text.split('\n')[1]
+    for interface in connection.get_config(source='running', filter=('subtree', INTERFACE_FILTER)).data[0]:
+        print(ElementTree.tostring(interface))
+        interface_name = interface[1].text
+        interface_status = interface[0].text
         yield (interface_name, interface_status)
 
 
 # Execute command
-def send_netconf_command(connection, command):
-    with connection.locked("candidate") as m:
-        m.load_configuration(
-            action='set',
-            config=command
-        )
+def set_interface_description(connection, interface_name, description):
+    # Builds the configuration elements required to set description
+    mergedConfig = ET.Element("config")
+    configuration = ET.SubElement(mergedConfig, "interface-configurations", nsmap={None: 'http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg'})
+    interface_cfg = ET.SubElement(configuration, "interface-configuration")
+    ET.SubElement(interface_cfg, "active").text = 'act'
+    ET.SubElement(interface_cfg, "interface-name").text = interface_name
+    ET.SubElement(interface_cfg, "description").text = description
 
-        m.commit()
+    with connection.locked("candidate"):
+        connection.edit_config(mergedConfig, default_operation="merge")
+        connection.commit()
 
 
 # Run program
-print("Loading..")
-print("Connecting..")
+print(f"Connecting to {serverCfg['host']}:{serverCfg['port']} defined with type: {serverCfg['type']}.")
 
-connection = connect(serverCfg)
-interface_statuses = get_interface_statuses(connection)
+with connect(serverCfg) as connection:
 
-print("Connected..")
+    print("Connected..")
 
-for interface_name, interface_status in interface_statuses:
-    print("Interface %s: %s" % (interface_name, interface_status))
+    for interface_name, interface_status in get_interface_statuses(connection):
+        set_interface_description(connection, interface_name, "LAST FETCH: %s" % int(datetime.now().timestamp()))
+        print("Interface %s: %s" % (interface_name, True if interface_status == 'act' else False))
 
-send_netconf_command(connection, "set interfaces LAST FETCH: %s" % int(datetime.now().timestamp()))
+print("Program has ended...")
